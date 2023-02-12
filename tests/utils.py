@@ -2,11 +2,17 @@ import inspect
 import random
 import typing
 from io import StringIO
-from typing import Optional, Set, Type
+from typing import Optional, Sequence, Set, Type
 
 import numpy as np
 
 import albumentations
+from albumentations.core.transforms_interface import (
+    BBoxesInternalType,
+    BoxesArray,
+    KeypointsArray,
+    KeypointsInternalType,
+)
 
 
 def convert_2d_to_3d(arrays, num_channels=3):
@@ -134,3 +140,11 @@ def check_all_augs_exists(
         raise ValueError(f"These augmentations do not exist in augmentations and except_augmentations: {not_existed}")
 
     return augmentations
+
+
+def bboxes_list_to_internal_type(bboxes: Sequence[tuple]) -> BBoxesInternalType:
+    bbox_array, targets = [], []
+    for bbox in bboxes:
+        bbox_array.append(bbox[:4])
+        targets.append(bbox[4:])
+    return BBoxesInternalType(array=np.array(bbox_array, dtype=float), targets=targets)

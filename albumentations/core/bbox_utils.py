@@ -30,21 +30,11 @@ __all__ = [
     "union_of_bboxes",
     "BboxProcessor",
     "BboxParams",
-    "bboxes_to_array",
-    "array_to_bboxes",
     "ensure_bboxes_format",
     "use_bboxes_ndarray",
 ]
 
 TBox = TypeVar("TBox", BoxType, BBoxesInternalType)
-
-
-def bboxes_to_array(bboxes: Sequence[BoxType]) -> np.ndarray:
-    return np.array([bbox[:4] for bbox in bboxes])
-
-
-def array_to_bboxes(np_bboxes: np.ndarray, ori_bboxes: Sequence[BoxType]) -> List[BoxType]:
-    return [cast(BoxType, tuple(np_bbox) + tuple(bbox[4:])) for bbox, np_bbox in zip(ori_bboxes, np_bboxes)]
 
 
 def ensure_bboxes_format(func: Callable) -> Callable:
