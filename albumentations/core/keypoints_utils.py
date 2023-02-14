@@ -7,14 +7,14 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union, 
 
 import numpy as np
 
-from .transforms_interface import KeypointsArray, KeypointsInternalType
+from .transforms_interface import KeypointsArray, KeypointsInternalType, KeypointType
 from .utils import DataProcessor, Params, ensure_internal_format
 
 __all__ = [
     "angle_to_2pi_range",
     "check_keypoints",
-    "convert_keypoints_from_albumentations",
-    "convert_keypoints_to_albumentations",
+    "convert_keypoints_from_internal",
+    "convert_keypoints_to_internal",
     "filter_keypoints",
     "KeypointsProcessor",
     "KeypointParams",
@@ -27,6 +27,14 @@ keypoint_formats = {"xy", "yx", "xya", "xys", "xyas", "xysa"}
 def angle_to_2pi_range(angle: Union[np.ndarray, float]):
     two_pi = 2 * math.pi
     return angle % two_pi
+
+
+def split_keypoints_targets(keypoints: Sequence[KeypointType], coord_length: int) -> Tuple[np.ndarray, List[Any]]:
+    kps_array, targets = [], []
+    for kp in keypoints:
+        kps_array.append(kp[:coord_length])
+        targets.append(kp[coord_length:])
+    return np.array(kps_array, dtype=float), targets
 
 
 def use_keypoints_ndarray(return_array: bool = True) -> Callable:
@@ -123,25 +131,6 @@ class KeypointsProcessor(DataProcessor):
         assert isinstance(params, KeypointParams)
         super().__init__(params, additional_targets)
 
-    def convert_to_internal_type(self, data):
-        if not len(data):
-            return KeypointsInternalType(array=np.empty(0))
-        kps_array = []
-        targets = []
-        ori_kp_len = len(self.params.format)
-        for _data in data:
-            kps_array.append(_data[:ori_kp_len])
-            targets.append(_data[ori_kp_len:])
-        if ori_kp_len != 4:
-            kps_array = np.pad(kps_array, [(0, 0), (0, 4 - ori_kp_len)], mode="constant").astype(float)
-        else:
-            kps_array = np.array(kps_array, dtype=float)
-        return KeypointsInternalType(array=kps_array, targets=targets)
-
-    def convert_to_original_type(self, data):
-        dl = len(self.params.format)
-        return [tuple(kp.array[0].tolist()[:dl]) + tuple(kp.targets[0]) for kp in data]  # type: ignore[attr-defined]
-
     @property
     def default_data_name(self) -> str:
         return "keypoints"
@@ -183,8 +172,8 @@ class KeypointsProcessor(DataProcessor):
     def check(self, data, rows: int, cols: int) -> None:
         check_keypoints(data, rows, cols)
 
-    def convert_from_albumentations(self, data, rows: int, cols: int):
-        return convert_keypoints_from_albumentations(
+    def convert_from_internal(self, data, rows: int, cols: int):
+        return convert_keypoints_from_internal(
             data,
             self.params.format,
             rows,
@@ -193,8 +182,8 @@ class KeypointsProcessor(DataProcessor):
             angle_in_degrees=self.params.angle_in_degrees,
         )
 
-    def convert_to_albumentations(self, data, rows: int, cols: int):
-        return convert_keypoints_to_albumentations(
+    def convert_to_internal(self, data, rows: int, cols: int):
+        return convert_keypoints_to_internal(
             data,
             self.params.format,
             rows,
@@ -253,19 +242,18 @@ def filter_keypoints(
 
 
 @ensure_internal_format
-@use_keypoints_ndarray(return_array=True)
-def convert_keypoints_to_albumentations(
-    keypoints: KeypointsArray,
+def convert_keypoints_to_internal(
+    keypoints: Sequence[KeypointType],
     source_format: str,
     rows: int,
     cols: int,
     check_validity: bool = False,
     angle_in_degrees: bool = True,
-) -> KeypointsArray:
+) -> KeypointsInternalType:
     """Convert a batch of keypoints from source format to the format used by albumentations.
 
     Args:
-        keypoints (KeypointsArray): a batch of keypoints in source format.
+        keypoints (Sequence[KeypointType]): a batch of keypoints in source format.
         source_format (str):
         rows (int):
         cols (int):
@@ -282,45 +270,51 @@ def convert_keypoints_to_albumentations(
     if source_format not in keypoint_formats:
         raise ValueError(f"Unknown source_format {source_format}. " f"Supported formats are {keypoint_formats}.")
     if not len(keypoints):
-        return keypoints
+        return KeypointsInternalType()
 
     if source_format == "xy":
-        keypoints = np.concatenate((keypoints[..., :2], np.zeros_like(keypoints[..., :2])), axis=1)
+        kps_array, targets = split_keypoints_targets(keypoints, coord_length=2)
+        kps_array = np.concatenate((kps_array[..., :2], np.zeros_like(kps_array[..., :2])), axis=1)
     elif source_format == "yx":
-        keypoints = np.concatenate((keypoints[..., :2][..., ::-1], np.zeros_like(keypoints[..., :2])), axis=1)
+        kps_array, targets = split_keypoints_targets(keypoints, coord_length=2)
+        kps_array = np.concatenate((kps_array[..., :2][..., ::-1], np.zeros_like(kps_array[..., :2])), axis=1)
     elif source_format == "xya":
-        keypoints = np.concatenate((keypoints[..., :3], np.zeros_like(keypoints[..., 0][..., np.newaxis])), axis=1)
+        kps_array, targets = split_keypoints_targets(keypoints, coord_length=3)
+        kps_array = np.concatenate((kps_array[..., :3], np.zeros_like(kps_array[..., 0][..., np.newaxis])), axis=1)
     elif source_format == "xys":
-        keypoints = np.insert(keypoints[..., :3], 2, np.zeros_like(keypoints[..., 0]), axis=1)
+        kps_array, targets = split_keypoints_targets(keypoints, coord_length=3)
+        kps_array = np.insert(kps_array[..., :3], 2, np.zeros_like(kps_array[..., 0]), axis=1)
     elif source_format == "xyas":
-        keypoints = keypoints[..., :4]
+        kps_array, targets = split_keypoints_targets(keypoints, coord_length=4)
+        kps_array = kps_array[..., :4]
     elif source_format == "xysa":
-        keypoints = keypoints[..., [0, 1, 3, 2]]
+        kps_array, targets = split_keypoints_targets(keypoints, coord_length=4)
+        kps_array = kps_array[..., [0, 1, 3, 2]]
     else:
         raise ValueError(f"Unsupported source format. Got {source_format}.")
 
     if angle_in_degrees:
-        keypoints[..., 2] = np.radians(keypoints[..., 2])
-    keypoints[..., 2] = angle_to_2pi_range(keypoints[..., 2])
+        kps_array[..., 2] = np.radians(kps_array[..., 2])
+    kps_array[..., 2] = angle_to_2pi_range(kps_array[..., 2])
+
+    kps_type = KeypointsInternalType(array=kps_array, targets=targets)
     if check_validity:
-        check_keypoints(keypoints, rows=rows, cols=cols)
-    return keypoints
+        check_keypoints(kps_type, rows=rows, cols=cols)
+    return kps_type
 
 
-@ensure_internal_format
-@use_keypoints_ndarray(return_array=True)
-def convert_keypoints_from_albumentations(
-    keypoints: KeypointsArray,
+def convert_keypoints_from_internal(
+    keypoints: KeypointsInternalType,
     target_format: str,
     rows: int,
     cols: int,
     check_validity: bool = False,
     angle_in_degrees: bool = True,
-) -> KeypointsArray:
+) -> Sequence[KeypointType]:
     """Convert a batch of keypoints from `albumentations` format to target format.
 
     Args:
-        keypoints (KeypointsArray): A batch of keypoints in `albumentations` format, which is [x, y, a, s].
+        keypoints (KeypointsInternalType): A batch of keypoints in `albumentations` format, which is [x, y, a, s].
         target_format (str):
         rows (int):
         cols (int):
@@ -328,7 +322,7 @@ def convert_keypoints_from_albumentations(
         angle_in_degrees (bool):
 
     Returns:
-        KeypointsArray: A batch of keypoints in target format.
+        Sequence[KeypointType]: A batch of keypoints in target format.
 
     Raises:
         ValueError: Unknown target format is given.
@@ -338,28 +332,35 @@ def convert_keypoints_from_albumentations(
         raise ValueError(f"Unknown target_format {target_format}. " f"Supported formats are: {keypoint_formats}.")
 
     if not len(keypoints):
-        return keypoints
+        return []
 
-    keypoints[..., 2] = angle_to_2pi_range(keypoints[..., 2])
+    keypoints.array[..., 2] = angle_to_2pi_range(keypoints.array[..., 2])
     if check_validity:
         check_keypoints(keypoints, rows, cols)
 
     if angle_in_degrees:
-        keypoints[..., 2] = np.degrees(keypoints[..., 2])
+        keypoints.array[..., 2] = np.degrees(keypoints.array[..., 2])
 
+    ret = []
     if target_format == "xy":
-        keypoints = keypoints[..., :2]
+        for kp_array, target in zip(keypoints.array[..., :2], keypoints.targets):
+            ret.append(cast(KeypointType, tuple(kp_array) + tuple(target)))
     elif target_format == "yx":
-        keypoints = keypoints[..., :2][..., ::-1]
+        for kp_array, target in zip(keypoints.array[..., [1, 0]], keypoints.targets):
+            ret.append(cast(KeypointType, tuple(kp_array) + tuple(target)))
     elif target_format == "xya":
-        keypoints = keypoints[..., [0, 1, 2]]
+        for kp_array, target in zip(keypoints.array[..., [0, 1, 2]], keypoints.targets):
+            ret.append(cast(KeypointType, tuple(kp_array) + tuple(target)))
     elif target_format == "xys":
-        keypoints = keypoints[..., [0, 1, 3]]
+        for kp_array, target in zip(keypoints.array[..., [0, 1, 3]], keypoints.targets):
+            ret.append(cast(KeypointType, tuple(kp_array) + tuple(target)))
     elif target_format == "xyas":
-        keypoints = keypoints[..., :4]
+        for kp_array, target in zip(keypoints.array, keypoints.targets):
+            ret.append(cast(KeypointType, tuple(kp_array) + tuple(target)))
     elif target_format == "xysa":
-        keypoints = keypoints[..., [0, 1, 3, 2]]
+        for kp_array, target in zip(keypoints.array[..., [0, 1, 3, 2]], keypoints.targets):
+            ret.append(cast(KeypointType, tuple(kp_array) + tuple(target)))
     else:
         raise ValueError(f"Invalid target format. Got: {target_format}.")
 
-    return keypoints
+    return ret

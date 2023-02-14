@@ -7,7 +7,6 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, TypeVar
 import numpy as np
 
 from .serialization import Serializable
-from .transforms_interface import BatchInternalType
 
 InternalDtype = TypeVar("InternalDtype")
 
@@ -22,6 +21,7 @@ def ensure_internal_format(func: Callable) -> Callable:
     Returns:
         Callable, a callable with the first argument with type BatchInternalType.
     """
+    from .transforms_interface import BatchInternalType
 
     @wraps(func)
     def wrapper(data, *args, **kwargs):  # noqa
@@ -95,21 +95,12 @@ class DataProcessor(ABC):
     def ensure_transforms_valid(self, transforms: Sequence[object]) -> None:
         pass
 
-    @abstractmethod
-    def convert_to_internal_type(self, data: Any):
-        raise NotImplementedError
-
-    @abstractmethod
-    def convert_to_original_type(self, data: InternalDtype) -> Any:
-        raise NotImplementedError
-
     def postprocess(self, data: Dict[str, Any]) -> Dict[str, Any]:
         rows, cols = get_shape(data["image"])
 
         for data_name in self.data_fields:
             _data = self.filter(data[data_name], rows, cols, data_name)
-            _data = self.check_and_convert(_data, rows, cols, direction="from")
-            data[data_name] = self.convert_to_original_type(_data)
+            data[data_name] = self.check_and_convert(_data, rows, cols, direction="from")
 
         data = self.remove_label_fields_from_data(data)
         return data
@@ -119,18 +110,14 @@ class DataProcessor(ABC):
 
         rows, cols = data["image"].shape[:2]
         for data_name in self.data_fields:
-            data[data_name] = self.convert_to_internal_type(data[data_name])
             data[data_name] = self.check_and_convert(data[data_name], rows, cols, direction="to")
 
     def check_and_convert(self, data: Union[Sequence, InternalDtype], rows: int, cols: int, direction: str = "to"):
-        if self.params.format == "albumentations":
-            self.check(data, rows, cols)
-            return data
 
         if direction == "to":
-            return self.convert_to_albumentations(data, rows, cols)
+            return self.convert_to_internal(data, rows, cols)
         elif direction == "from":
-            return self.convert_from_albumentations(data, rows, cols)
+            return self.convert_from_internal(data, rows, cols)
         else:
             raise ValueError(f"Invalid direction. Must be `to` or `from`. Got `{direction}`")
 
@@ -145,13 +132,13 @@ class DataProcessor(ABC):
         pass
 
     @abstractmethod
-    def convert_to_albumentations(
+    def convert_to_internal(
         self, data: Union[Sequence, InternalDtype], rows: int, cols: int
     ) -> Union[Sequence, InternalDtype]:
         pass
 
     @abstractmethod
-    def convert_from_albumentations(
+    def convert_from_internal(
         self, data: Union[Sequence, InternalDtype], rows: int, cols: int
     ) -> Union[Sequence, InternalDtype]:
         pass

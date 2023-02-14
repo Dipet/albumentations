@@ -1,30 +1,24 @@
 from __future__ import division
 
 from functools import wraps
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Sequence,
-    Tuple,
-    TypeVar,
-    Union,
-    cast,
-)
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union, cast
 
 import numpy as np
 
-from .transforms_interface import BBoxesInternalType, BoxesArray, BoxType
+from .transforms_interface import (
+    BBoxesInternalType,
+    BoxesArray,
+    BoxInternalType,
+    BoxType,
+)
 from .utils import DataProcessor, Params, ensure_internal_format
 
 __all__ = [
     "normalize_bboxes_np",
     "denormalize_bboxes_np",
     "calculate_bboxes_area",
-    "convert_bboxes_to_albumentations",
-    "convert_bboxes_from_albumentations",
+    "convert_bboxes_to_internal",
+    "convert_bboxes_from_internal",
     "check_bboxes",
     "filter_bboxes",
     "union_of_bboxes",
@@ -33,7 +27,13 @@ __all__ = [
     "use_bboxes_ndarray",
 ]
 
-TBox = TypeVar("TBox", BoxType, BBoxesInternalType)
+
+def split_bboxes_targets(bboxes: Sequence[BoxType]) -> Tuple[np.ndarray, List[Any]]:
+    bbox_array, targets = [], []
+    for bbox in bboxes:
+        bbox_array.append(bbox[:4])
+        targets.append(bbox[4:])
+    return np.array(bbox_array, dtype=float), targets
 
 
 def use_bboxes_ndarray(return_array: bool = True) -> Callable:
@@ -144,17 +144,6 @@ class BboxProcessor(DataProcessor):
     def __init__(self, params: BboxParams, additional_targets: Optional[Dict[str, str]] = None):
         super().__init__(params, additional_targets)
 
-    def convert_to_internal_type(self, data):
-        box_array = []
-        targets = []
-        for _data in data:
-            box_array.append(_data[:4])
-            targets.append(_data[4:])
-        return BBoxesInternalType(array=np.array(box_array).astype(float), targets=targets)
-
-    def convert_to_original_type(self, data):
-        return [tuple(bbox.array[0].tolist()) + tuple(bbox.targets[0]) for bbox in data]  # type: ignore[attr-defined]
-
     @property
     def default_data_name(self) -> str:
         return "bboxes"
@@ -189,11 +178,11 @@ class BboxProcessor(DataProcessor):
     def check(self, data, rows: int, cols: int) -> None:
         check_bboxes(data)
 
-    def convert_from_albumentations(self, data, rows: int, cols: int):
-        return convert_bboxes_from_albumentations(data, self.params.format, rows, cols, check_validity=True)
+    def convert_from_internal(self, data, rows: int, cols: int):
+        return convert_bboxes_from_internal(data, self.params.format, rows, cols, check_validity=True)
 
-    def convert_to_albumentations(self, data, rows: int, cols: int):
-        return convert_bboxes_to_albumentations(data, self.params.format, rows, cols, check_validity=True)
+    def convert_to_internal(self, data, rows: int, cols: int):
+        return convert_bboxes_to_internal(data, self.params.format, rows, cols, check_validity=True)
 
 
 @use_bboxes_ndarray(return_array=True)
@@ -257,10 +246,9 @@ def calculate_bboxes_area(bboxes: BoxesArray, rows: int, cols: int) -> np.ndarra
 
 
 @ensure_internal_format
-@use_bboxes_ndarray(return_array=True)
-def convert_bboxes_to_albumentations(
-    bboxes: BoxesArray, source_format: str, rows: int, cols: int, check_validity: bool = False
-) -> BoxesArray:
+def convert_bboxes_to_internal(
+    bboxes: Sequence[BoxType], source_format: str, rows: int, cols: int, check_validity: bool = False
+) -> BBoxesInternalType:
     """Convert a batch of bounding boxes from a format specified in `source_format` to the format used by albumentations
 
     Args:
@@ -278,38 +266,39 @@ def convert_bboxes_to_albumentations(
 
     """
     if not len(bboxes):
-        return bboxes
+        return BBoxesInternalType()
 
     if source_format not in {"coco", "pascal_voc", "yolo"}:
         raise ValueError(
             f"Unknown source_format {source_format}. Supported formats are: 'coco', 'pascal_voc' and 'yolo'"
         )
 
+    bbox_array, targets = split_bboxes_targets(bboxes)
+    bboxes_internal = BBoxesInternalType(array=bbox_array, targets=targets)
+
     if source_format == "coco":
 
-        bboxes[:, 2:] += bboxes[:, :2]
+        bboxes_internal.array[:, 2:] += bboxes_internal.array[:, :2]
     elif source_format == "yolo":
         # https://github.com/pjreddie/darknet/blob/f6d861736038da22c9eb0739dca84003c5a5e275/scripts/voc_label.py#L12
 
-        if check_validity and np.any((bboxes <= 0) | (bboxes > 1)):
+        if check_validity and np.any((bboxes_internal.array <= 0) | (bboxes_internal.array > 1)):
             raise ValueError("In YOLO format all coordinates must be float and in range (0, 1]")
 
-        bboxes[:, :2] -= bboxes[:, 2:] / 2
-        bboxes[:, 2:] += bboxes[:, :2]
+        bboxes_internal.array[:, :2] -= bboxes_internal.array[:, 2:] / 2
+        bboxes_internal.array[:, 2:] += bboxes_internal.array[:, :2]
 
     if source_format != "yolo":
-        bboxes = normalize_bboxes_np(bboxes, rows, cols)
+        bboxes_internal = normalize_bboxes_np(bboxes_internal, rows, cols)
     if check_validity:
-        check_bboxes(bboxes)
+        check_bboxes(bboxes_internal)
 
-    return bboxes
+    return bboxes_internal
 
 
-@ensure_internal_format
-@use_bboxes_ndarray(return_array=True)
-def convert_bboxes_from_albumentations(
-    bboxes: BoxesArray, target_format: str, rows: int, cols: int, check_validity: bool = False
-) -> BoxesArray:
+def convert_bboxes_from_internal(
+    bboxes: BBoxesInternalType, target_format: str, rows: int, cols: int, check_validity: bool = False
+) -> Sequence[BoxInternalType]:
     """Convert a list of bounding boxes from the format used by albumentations to a format, specified
     in `target_format`.
 
@@ -325,7 +314,7 @@ def convert_bboxes_from_albumentations(
 
     """
     if not len(bboxes):
-        return bboxes
+        return []
     if target_format not in {"coco", "pascal_voc", "yolo"}:
         raise ValueError(
             f"Unknown target_format {target_format}. Supported formats are `coco`, `pascal_voc`, and `yolo`."
@@ -337,13 +326,17 @@ def convert_bboxes_from_albumentations(
     if target_format != "yolo":
         bboxes = denormalize_bboxes_np(bboxes, rows=rows, cols=cols)
     if target_format == "coco":
-        bboxes[:, 2] -= bboxes[:, 0]
-        bboxes[:, 3] -= bboxes[:, 1]
+        bboxes.array[:, 2] -= bboxes.array[:, 0]
+        bboxes.array[:, 3] -= bboxes.array[:, 1]
     elif target_format == "yolo":
-        bboxes[:, 2:] -= bboxes[:, :2]
-        bboxes[:, :2] += bboxes[:, 2:] / 2.0
+        bboxes.array[:, 2:] -= bboxes.array[:, :2]
+        bboxes.array[:, :2] += bboxes.array[:, 2:] / 2.0
 
-    return bboxes
+    ret = []
+    for bbox_array, target in zip(bboxes.array, bboxes.targets):
+        ret.append(cast(BoxInternalType, tuple(bbox_array) + tuple(target)))
+
+    return ret
 
 
 @use_bboxes_ndarray(return_array=False)
@@ -432,7 +425,7 @@ def filter_bboxes(
 
 
 @use_bboxes_ndarray(return_array=False)
-def union_of_bboxes(bboxes: BoxesArray, height: int, width: int, erosion_rate: float = 0.0) -> BoxType:
+def union_of_bboxes(bboxes: BoxesArray, height: int, width: int, erosion_rate: float = 0.0) -> BoxInternalType:
     """Calculate union of bounding boxes.
 
     Args:

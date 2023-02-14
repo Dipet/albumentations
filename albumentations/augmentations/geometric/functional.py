@@ -22,12 +22,11 @@ from ...core.bbox_utils import (
 )
 from ...core.keypoints_utils import use_keypoints_ndarray
 from ...core.transforms_interface import (
+    BBoxesInternalType,
     BoxesArray,
-    BoxType,
     FillValueType,
     ImageColorType,
     KeypointsArray,
-    KeypointsInternalType,
 )
 from ...core.utils import ensure_internal_format
 
@@ -980,6 +979,7 @@ def rot90(img: np.ndarray, factor: int) -> np.ndarray:
     return np.ascontiguousarray(img)
 
 
+@ensure_internal_format
 @use_bboxes_ndarray(return_array=True)
 def bboxes_vflip(bboxes: BoxesArray, **kwargs) -> BoxesArray:
     """Flip a batch of bounding boxes vertically around the x-axis.
@@ -996,6 +996,7 @@ def bboxes_vflip(bboxes: BoxesArray, **kwargs) -> BoxesArray:
     return bboxes
 
 
+@ensure_internal_format
 @use_bboxes_ndarray(return_array=True)
 def bboxes_hflip(bboxes: BoxesArray, **kwargs) -> BoxesArray:
     """Flip a batch of bounding boxes horizontally around the y-axis.
@@ -1013,17 +1014,16 @@ def bboxes_hflip(bboxes: BoxesArray, **kwargs) -> BoxesArray:
 
 
 @ensure_internal_format
-@use_bboxes_ndarray(return_array=True)
-def bboxes_flip(bboxes: BoxesArray, d: int, **kwargs) -> BoxesArray:
+def bboxes_flip(bboxes: BBoxesInternalType, d: int, **kwargs) -> BoxesArray:
     """Flip a batch of bounding boxes either vertically, horizontally or both depending on the value of `d`.
 
     Args:
-        bboxes (BoxesArray): A batch of bounding boxes in `albumentations` format.
+        bboxes (BBoxesInternalType): A batch of bounding boxes in `albumentations` format.
         d (int): dimension 0 for vertical flip, 1 for horizontal, -1 for transpose.
         **kwargs:
 
     Returns:
-        BoxesArray: A batch of flipped bounding boxes in `albumentations` format.
+        BBoxesInternalType: A batch of flipped bounding boxes in `albumentations` format.
 
     Raises:
         ValueError: if value of `d` is not -1, 0 or 1.
