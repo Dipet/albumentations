@@ -132,15 +132,11 @@ class DataProcessor(ABC):
         pass
 
     @abstractmethod
-    def convert_to_internal(
-        self, data: Union[Sequence, InternalDtype], rows: int, cols: int
-    ) -> Union[Sequence, InternalDtype]:
+    def convert_to_internal(self, data: Any, rows: int, cols: int) -> InternalDtype:  # type: ignore[type-var]
         pass
 
     @abstractmethod
-    def convert_from_internal(
-        self, data: Union[Sequence, InternalDtype], rows: int, cols: int
-    ) -> Union[Sequence, InternalDtype]:
+    def convert_from_internal(self, data: InternalDtype, rows: int, cols: int) -> Any:
         pass
 
     def add_label_fields_to_data(self, data: Dict[str, Any]) -> Dict[str, Any]:

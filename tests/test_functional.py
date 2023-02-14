@@ -802,7 +802,8 @@ def test_bboxes_rot90(bboxes, factors, rows, cols, expect):
     ],
 )
 def test_bboxes_transpose(bboxes, axis, expect):
-    assert np.allclose(FGeometric.bboxes_transpose(bboxes, axis), expect)
+    bboxes = BBoxesInternalType(bboxes)
+    assert np.allclose(FGeometric.bboxes_transpose(bboxes, axis).array, expect)
 
 
 @pytest.mark.parametrize(
